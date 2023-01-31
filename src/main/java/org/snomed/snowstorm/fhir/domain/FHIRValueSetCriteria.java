@@ -20,7 +20,7 @@ public class FHIRValueSetCriteria {
 	private String version;
 
 	@Field(type = FieldType.Keyword)
-	private List<String> codes;
+	private List<ValueSet.ConceptReferenceComponent> concepts;
 
 	private List<FHIRValueSetFilter> filter;
 
@@ -32,12 +32,7 @@ public class FHIRValueSetCriteria {
 	public FHIRValueSetCriteria(ValueSet.ConceptSetComponent hapiCriteria) {
 		system = hapiCriteria.getSystem();
 		version = hapiCriteria.getVersion();
-		for (ValueSet.ConceptReferenceComponent code : hapiCriteria.getConcept()) {
-			if (codes == null) {
-				codes = new ArrayList<>();
-			}
-			codes.add(code.getCode());
-		}
+		concepts = hapiCriteria.getConcept();
 		for (ValueSet.ConceptSetFilterComponent hapiFilter : hapiCriteria.getFilter()) {
 			if (filter == null) {
 				filter = new ArrayList<>();
@@ -51,10 +46,8 @@ public class FHIRValueSetCriteria {
 		ValueSet.ConceptSetComponent hapiConceptSet = new ValueSet.ConceptSetComponent();
 		hapiConceptSet.setSystem(system);
 		hapiConceptSet.setVersion(version);
-		for (String code : orEmpty(codes)) {
-			ValueSet.ConceptReferenceComponent component = new ValueSet.ConceptReferenceComponent();
-			component.setCode(code);
-			hapiConceptSet.addConcept(component);
+		for (ValueSet.ConceptReferenceComponent concpet : orEmpty(concepts)) {
+			hapiConceptSet.addConcept(concpet);
 		}
 		for (FHIRValueSetFilter filter : orEmpty(getFilter())) {
 			hapiConceptSet.addFilter(filter.getHapi());
@@ -79,12 +72,12 @@ public class FHIRValueSetCriteria {
 		this.version = version;
 	}
 
-	public List<String> getCodes() {
-		return codes;
+	public List<ValueSet.ConceptReferenceComponent> getConcepts() {
+		return concepts;
 	}
 
-	public void setCodes(List<String> codes) {
-		this.codes = codes;
+	public void setConcepts(List<ValueSet.ConceptReferenceComponent> concepts) {
+		this.concepts = concepts;
 	}
 
 	public List<FHIRValueSetFilter> getFilter() {
