@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -100,18 +101,27 @@ public class HapiParametersMapper implements FHIRConstants {
 		parameters.addParameter("version", codeSystem.getVersion());
 	}
 
-	public Parameters mapToFHIR(FHIRCodeSystemVersion codeSystemVersion, FHIRConcept concept) {
+	public Parameters mapToFHIR(FHIRCodeSystemVersion codeSystemVersion, FHIRConcept concept, List<CodeType> propertiesType) {
 		Parameters parameters = new Parameters();
 		parameters.addParameter("name", codeSystemVersion.getTitle());
 		parameters.addParameter("system", codeSystemVersion.getUrl());
 		parameters.addParameter("version", codeSystemVersion.getVersion());
 		parameters.addParameter("display", concept.getDisplay());
 
+		Set<String> properties = new HashSet<>();
+		if(propertiesType != null) {
+			for(CodeType codeType: propertiesType) {
+				properties.add(codeType.getValue());
+			}
+		}
+		
 		for (Map.Entry<String, List<FHIRProperty>> property : concept.getProperties().entrySet()) {
 			for (FHIRProperty propertyValue : property.getValue()) {
-				Parameters.ParametersParameterComponent param = parameters.addParameter().setName(PROPERTY);
-				param.addPart().setName(CODE).setValue(new CodeType(propertyValue.getCode()));
-				param.addPart().setName(VALUE).setValue(propertyValue.toHapiValue(codeSystemVersion.getUrl()));
+				if(properties.isEmpty() || properties.contains(propertyValue.getCode())){
+					Parameters.ParametersParameterComponent param = parameters.addParameter().setName(PROPERTY);
+					param.addPart().setName(CODE).setValue(new CodeType(propertyValue.getCode()));
+					param.addPart().setName(VALUE).setValue(propertyValue.toHapiValue(codeSystemVersion.getUrl()));
+				}
 			}
 		}
 
