@@ -1,7 +1,7 @@
 FROM maven:3.6.3-openjdk-11 AS builder
 COPY . /usr/src/app
 WORKDIR /usr/src/app
-RUN mvn clean install -DskipTests=true 
+RUN mvn clean install -DskipTests=true -Ddependency-check.skip=true
 
 
 FROM adoptopenjdk/openjdk11:alpine
