@@ -23,10 +23,7 @@ import org.snomed.snowstorm.core.data.domain.jobs.ExportConfiguration;
 import org.snomed.snowstorm.core.data.domain.jobs.IdentifiersForRegistration;
 import org.snomed.snowstorm.core.data.services.*;
 import org.snomed.snowstorm.core.data.services.classification.BranchClassificationStatusService;
-import org.snomed.snowstorm.core.data.services.identifier.IdentifierCacheManager;
-import org.snomed.snowstorm.core.data.services.identifier.IdentifierSource;
-import org.snomed.snowstorm.core.data.services.identifier.LocalRandomIdentifierSource;
-import org.snomed.snowstorm.core.data.services.identifier.SnowstormCISClient;
+import org.snomed.snowstorm.core.data.services.identifier.*;
 import org.snomed.snowstorm.core.data.services.pojo.DescriptionCriteria;
 import org.snomed.snowstorm.core.data.services.servicehook.CommitServiceHookClient;
 import org.snomed.snowstorm.core.data.services.traceability.TraceabilityLogService;
@@ -45,7 +42,6 @@ import org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestCli
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cloud.aws.autoconfigure.context.ContextStackAutoConfiguration;
@@ -219,6 +215,8 @@ public abstract class Config extends ElasticsearchConfig {
 
 		if (cisApiUrl.equals("local-random") || cisApiUrl.equals("local")) {// local is the legacy name
 			return new LocalRandomIdentifierSource(elasticsearchRestTemplate());
+		} else if (cisApiUrl.equals("local-sequential")) {
+			return new LocalSequentialIdentifierSource(elasticsearchRestTemplate());
 		} else {
 			return new SnowstormCISClient(cisApiUrl, username, password, softwareName, timeoutSeconds);
 		}
@@ -244,8 +242,8 @@ public abstract class Config extends ElasticsearchConfig {
 
 	@Bean
 	@ConfigurationProperties(prefix = "codesystem")
-	public CodeSystemConfigurationService getCodeSystemConfigurationService() {
-		return new CodeSystemConfigurationService();
+	public CodeSystemDefaultConfigurationService getCodeSystemConfigurationService() {
+		return new CodeSystemDefaultConfigurationService();
 	}
 	
 	@Bean

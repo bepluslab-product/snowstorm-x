@@ -11,13 +11,13 @@ import ca.uhn.fhir.rest.server.IResourceProvider;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.*;
 import org.hl7.fhir.r4.model.OperationOutcome.IssueType;
-import org.snomed.snowstorm.core.data.services.QueryService;
 import org.snomed.snowstorm.fhir.config.FHIRConstants;
 import org.snomed.snowstorm.fhir.domain.FHIRValueSet;
 import org.snomed.snowstorm.fhir.domain.SearchFilter;
 import org.snomed.snowstorm.fhir.pojo.ValueSetExpansionParameters;
 import org.snomed.snowstorm.fhir.repositories.FHIRValueSetRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
@@ -36,6 +36,9 @@ import static org.snomed.snowstorm.fhir.services.FHIRHelper.exception;
 @Component
 public class FHIRValueSetProvider implements IResourceProvider, FHIRConstants {
 
+	@Value("${snowstorm.rest-api.readonly}")
+	private boolean readOnlyMode;
+
 	@Autowired
 	private FHIRValueSetRepository valuesetRepository;
 
@@ -50,14 +53,15 @@ public class FHIRValueSetProvider implements IResourceProvider, FHIRConstants {
 
 	public static int DEFAULT_PAGESIZE = 1_000;
 
-	@Read()
+	@Read
 	public ValueSet getValueSet(@IdParam IdType id) {
 		Optional<FHIRValueSet> valueSetOptional = valuesetRepository.findById(id.getIdPart());
 		return valueSetOptional.map(FHIRValueSet::getHapi).orElse(null);
 	}
 
-	@Create()
+	@Create
 	public MethodOutcome createValueSet(@IdParam IdType id, @ResourceParam ValueSet vs) {
+		FHIRHelper.readOnlyCheck(readOnlyMode);
 		MethodOutcome outcome = new MethodOutcome();
 		FHIRValueSet savedVs = valueSetService.createOrUpdateValueset(vs);
 		outcome.setId(new IdType("ValueSet", savedVs.getId(), vs.getVersion()));
@@ -66,6 +70,7 @@ public class FHIRValueSetProvider implements IResourceProvider, FHIRConstants {
 
 	@Update
 	public MethodOutcome updateValueSet(@IdParam IdType id, @ResourceParam ValueSet vs) {
+		FHIRHelper.readOnlyCheck(readOnlyMode);
 		try {
 			return createValueSet(id, vs);
 		} catch (SnowstormFHIRServerResponseException e) {
@@ -79,6 +84,7 @@ public class FHIRValueSetProvider implements IResourceProvider, FHIRConstants {
 			@OptionalParam(name="url") UriType url,
 			@OptionalParam(name="version") String version) {
 
+		FHIRHelper.readOnlyCheck(readOnlyMode);
 		if (id != null) {
 			valuesetRepository.deleteById(id.getIdPart());
 		} else {
@@ -299,12 +305,6 @@ public class FHIRValueSetProvider implements IResourceProvider, FHIRConstants {
 
 	private void validateCodeParamHints(String incorrectParamSystemVersion) {
 		FHIRHelper.parameterNamingHint("system-version", incorrectParamSystemVersion, "systemVersion");
-	}
-
-	private void validateId(IdType id, ValueSet vs) {
-		if (vs.getId() == null || !id.asStringValue().equals(vs.getId())) {
-			throw exception("ID in request must match that in ValueSet object", IssueType.EXCEPTION, 400);
-		}
 	}
 
 	@Override

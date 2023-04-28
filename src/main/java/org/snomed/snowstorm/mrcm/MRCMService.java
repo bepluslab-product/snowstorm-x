@@ -66,7 +66,7 @@ public class MRCMService {
 			String branchPath, List<LanguageDialect> languageDialects) throws ServiceException {
 
 		BranchCriteria branchCriteria = versionControlHelper.getBranchCriteria(branchPath);
-		final MRCM branchMRCM = mrcmLoader.loadActiveMRCM(branchPath, branchCriteria);
+		final MRCM branchMRCM = mrcmLoader.loadActiveMRCM(branchCriteria);
 
 		final List<AttributeDomain> attributeDomains = doRetrieveDomainAttributes(contentType, proximalPrimitiveModeling, parentIds, branchCriteria, branchMRCM);
 		Set<String> attributeIds = attributeDomains.stream().map(AttributeDomain::getReferencedComponentId).collect(Collectors.toSet());
@@ -86,10 +86,10 @@ public class MRCMService {
 	}
 
 	public Collection<ConceptMini> retrieveDomainAttributes(ContentType contentType, boolean proximalPrimitiveModeling, Set<Long> parentIds,
-			String branchPath, BranchCriteria branchCriteria) throws ServiceException {
+			BranchCriteria branchCriteria) throws ServiceException {
 
 		// Load MRCM using active records applicable to this branch
-		final MRCM branchMRCM = mrcmLoader.loadActiveMRCM(branchPath, branchCriteria);
+		final MRCM branchMRCM = mrcmLoader.loadActiveMRCM(branchCriteria);
 		final List<AttributeDomain> attributeDomains = doRetrieveDomainAttributes(contentType, proximalPrimitiveModeling, parentIds, branchCriteria, branchMRCM);
 
 		Set<String> attributeIds = attributeDomains.stream().map(AttributeDomain::getReferencedComponentId).collect(Collectors.toSet());
@@ -99,7 +99,7 @@ public class MRCMService {
 			for (String attributeId : attributeIds) {
 				if (!foundConceptIds.contains(attributeId)) {
 					logger.warn("The concept to represent attribute {} is in the MRCM Attribute Domain reference set but is missing from branch {}.",
-							attributeId, branchPath);
+							attributeId, branchCriteria.getBranchPath());
 				}
 			}
 		}
@@ -109,7 +109,7 @@ public class MRCMService {
 	}
 
 	public List<AttributeDomain> doRetrieveDomainAttributes(ContentType contentType, boolean proximalPrimitiveModeling, Set<Long> parentIds,
-			BranchCriteria branchCriteria, MRCM branchMRCM) throws ServiceException {
+			BranchCriteria branchCriteria, MRCM branchMRCM) {
 
 		List<AttributeDomain> attributeDomains = new ArrayList<>();
 
@@ -163,7 +163,7 @@ public class MRCMService {
 
 	public Collection<ConceptMini> retrieveAttributeValues(ContentType contentType, String attributeId, String termPrefix, String branchPath, List<LanguageDialect> languageDialects) throws ServiceException {
 		BranchCriteria branchCriteria = versionControlHelper.getBranchCriteria(branchPath);
-		MRCM branchMRCM = mrcmLoader.loadActiveMRCM(branchPath, branchCriteria);
+		MRCM branchMRCM = mrcmLoader.loadActiveMRCM(branchCriteria);
 		return retrieveAttributeValues(contentType, attributeId, termPrefix, branchPath, languageDialects, branchMRCM);
 	}
 

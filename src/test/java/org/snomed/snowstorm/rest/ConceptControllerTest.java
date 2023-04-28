@@ -4,8 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kaicode.elasticvc.api.BranchService;
 import io.kaicode.elasticvc.api.ComponentService;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.snomed.snowstorm.AbstractTest;
@@ -21,9 +19,11 @@ import org.snomed.snowstorm.loadtest.ItemsPagePojo;
 import org.snomed.snowstorm.rest.pojo.ConceptBulkLoadRequest;
 import org.snomed.snowstorm.util.ConceptControllerTestConstants;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.configurationprocessor.json.JSONException;
+import org.springframework.boot.configurationprocessor.json.JSONObject;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.web.server.LocalServerPort;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.*;
@@ -185,7 +185,12 @@ class ConceptControllerTest extends AbstractTest {
 	}
 
 	@Test
-	void testConceptEndpointFields() throws IOException {
+	@SuppressWarnings("unchecked")
+	void testConceptEndpointFields() throws IOException, ServiceException {
+		// Create target concepts
+		conceptService.create(new Concept(SNOMEDCT_ROOT), "MAIN/projectA");
+		conceptService.create(new Concept(CLINICAL_FINDING), "MAIN/projectA");
+
 		// Browser Concept
 		String responseBody = this.restTemplate.getForObject("http://localhost:" + port + "/browser/MAIN/concepts/257751006", String.class);
 		checkFields(responseBody);
@@ -196,14 +201,32 @@ class ConceptControllerTest extends AbstractTest {
 		assertEquals("LinkedHashMap", fsn.getClass().getSimpleName());
 		assertEquals("{term=Wallace \"69\" side-to-end anastomosis - action (qualifier value), lang=en}", fsn.toString());
 
+		responseBody = this.restTemplate.getForObject("http://localhost:" + port + "/browser/MAIN/projectA/concepts/257751006", String.class);
+		properties = objectMapper.readValue(responseBody, LinkedHashMap.class);
+		// Assert inferred relationship target fields
+		List<Map<String, Object>> relationships = (List<Map<String, Object>>) properties.get("relationships");
+		Map<String, Object> relationship = relationships.get(0);
+		Map<String, Object> target = (Map<String, Object>) relationship.get("target");
+		Boolean targetActive = (Boolean) target.get("active");
+		assertTrue(targetActive);
+
+		// Assert axiom "relationship" target fields
+		List<Map<String, Object>> axioms = (List<Map<String, Object>>) properties.get("classAxioms");
+		Map<String, Object> axiom = axioms.get(0);
+		List<Map<String, Object>> axiomRelationships = (List<Map<String, Object>>) axiom.get("relationships");
+		Map<String, Object> axiomRelationship = axiomRelationships.get(0);
+		Map<String, Object> axiomTarget = (Map<String, Object>) axiomRelationship.get("target");
+		Boolean axiomTargetActive = (Boolean) axiomTarget.get("active");
+		assertTrue(axiomTargetActive);
+
 		// Simple Concept
-		responseBody = this.restTemplate.getForObject("http://localhost:" + port + "/MAIN/concepts/257751006", String.class);
+		responseBody = this.restTemplate.getForObject("http://localhost:" + port + "/MAIN/projectA/concepts/257751006", String.class);
 		checkFields(responseBody);
 
 		// Simple Concept ECL
 		HashMap<String, Object> urlVariables = new HashMap<>();
 		urlVariables.put("ecl", "257751006");
-		responseBody = this.restTemplate.getForObject("http://localhost:" + port + "/MAIN/concepts", String.class, urlVariables);
+		responseBody = this.restTemplate.getForObject("http://localhost:" + port + "/MAIN/projectA/concepts", String.class, urlVariables);
 		checkFields(responseBody);
 	}
 
@@ -1403,7 +1426,7 @@ class ConceptControllerTest extends AbstractTest {
 		referenceSetMemberService.createMember("MAIN", refsetInDescriptor);
 	}
 
-	private CodeSystem createSourceCodeSystem(String shortName, String branchPath) {
+	private CodeSystem createSourceCodeSystem(String shortName, String branchPath) throws ServiceException {
 		CodeSystem extension = codeSystemService.createCodeSystem(new CodeSystem(shortName, branchPath));
 
 		branchService.updateMetadata(branchPath, ImmutableMap.of(

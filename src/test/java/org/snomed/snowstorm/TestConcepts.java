@@ -7,9 +7,8 @@ public class TestConcepts {
 
 	// Attributes
 	public static final String ASSOCIATED_MORPHOLOGY = "116676008";
-	public static final String PROCEDURE_SITE = "363704007";
 	public static final String PROCEDURE_SITE_DIRECT = "405813007";
-	public static final String LATERALITY = "272741003";
+	public static final String HAS_FILLING = "827081001";
 
 	// Qualifier Value
 	public static final String RIGHT = "24028007";
@@ -35,7 +34,6 @@ public class TestConcepts {
 	public static final String PENTALOGY_OF_FALLOT_INCORRECT_GROUPING = "999204306007";
 
 	// Procedure
-	public static final String PROCEDURE = "71388002";
 	public static final String OPERATION_ON_HEART = "64915003";
 	public static final String CHEST_IMAGING = "413815006";
 
@@ -44,4 +42,9 @@ public class TestConcepts {
 	public static final String AMPUTATION_FOOT_BILATERAL = "180030006";
 
 	public static final String NON_EXISTENT_CONCEPT = "12345001";
+
+	// Physical object
+	public static final String PHYSICAL_OBJECT = "260787004";
+	public static final String DEVICE = "49062001";
+	public static final String DOMESTIC = "272179000";
 }

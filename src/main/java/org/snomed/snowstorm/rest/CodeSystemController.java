@@ -9,9 +9,13 @@ import org.snomed.snowstorm.core.data.domain.CodeSystem;
 import org.snomed.snowstorm.core.data.domain.CodeSystemVersion;
 import org.snomed.snowstorm.core.data.domain.fieldpermissions.CodeSystemCreate;
 import org.snomed.snowstorm.core.data.services.*;
+import org.snomed.snowstorm.core.data.services.pojo.CodeSystemUpgradeJob;
 import org.snomed.snowstorm.dailybuild.DailyBuildService;
 import org.snomed.snowstorm.extension.ExtensionAdditionalLanguageRefsetUpgradeService;
-import org.snomed.snowstorm.rest.pojo.*;
+import org.snomed.snowstorm.rest.pojo.CodeSystemUpdateRequest;
+import org.snomed.snowstorm.rest.pojo.CodeSystemUpgradeRequest;
+import org.snomed.snowstorm.rest.pojo.CreateCodeSystemVersionRequest;
+import org.snomed.snowstorm.rest.pojo.ItemsPage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -52,20 +56,21 @@ public class CodeSystemController {
 	private boolean showFutureVersionsDefault;
 
 	@Value("${codesystem.all.latest-version.allow-internal-release}")
-	private boolean showInteralReleasesByDefault;
+	private boolean showInternalReleasesByDefault;
 
 	@Operation(summary = "Create a code system",
-			description = "Required fields are shortName and branch.\n" +
-					"shortName should use format SNOMEDCT-XX where XX is the country code for national extensions.\n" +
-					"dependantVersion uses effectiveTime format and can be used if the new code system depends on an older version of the parent code system, " +
-					"otherwise the latest version will be selected automatically.\n" +
-					"defaultLanguageCode can be used to force the sort order of the languages listed under the codesystem, " +
-					"otherwise these are sorted by the number of active translated terms.\n" +
-					"maintainerType has no effect on API behaviour but can be used in frontend applications for extension categorisation.\n" +
-					"defaultLanguageReferenceSet has no effect API behaviour but can be used by browsers to reflect extension preferences. ")
+			description = "Required fields are **shortName** and **branchPath**.  \n\n" +
+					"- **shortName** should use format SNOMEDCT-XX where XX is the country code for national extensions.  \n" +
+					"- **dependantVersion** uses effectiveTime format and can be used if the new code system depends on an older version of the parent code system, " +
+					"otherwise the latest version will be selected automatically.  \n" +
+					"- **defaultLanguageCode** can be used to force the sort order of the languages listed under the codesystem, " +
+					"otherwise these are sorted by the number of active translated terms.  \n" +
+					"- **maintainerType** has no effect on API behaviour but can be used in frontend applications for extension categorisation.  \n" +
+					"- **defaultLanguageReferenceSet** has no effect API behaviour but can be used by browsers to reflect extension preferences.  \n" +
+					"- **postcoordinationLevel** should be set to 0 unless creating a Postcoordinated Expression Repository. ")
 	@PostMapping
 	@PreAuthorize("hasPermission('ADMIN', #codeSystem.branchPath)")
-	public ResponseEntity<Void> createCodeSystem(@RequestBody CodeSystemCreate codeSystem) {
+	public ResponseEntity<Void> createCodeSystem(@RequestBody CodeSystemCreate codeSystem) throws ServiceException {
 		codeSystemService.createCodeSystem((CodeSystem) codeSystem);
 		return ControllerHelper.getCreatedResponse(codeSystem.getShortName());
 	}
@@ -105,7 +110,7 @@ public class CodeSystemController {
 	@DeleteMapping(value = "/{shortName}")
 	public void deleteCodeSystem(@PathVariable String shortName) {
 		CodeSystem codeSystem = findCodeSystem(shortName);
-		codeSystemService.deleteCodeSystemAndVersions(codeSystem);
+		codeSystemService.deleteCodeSystemAndVersions(codeSystem, false);
 	}
 
 	@Operation(summary = "Retrieve versions of a code system")
@@ -124,7 +129,7 @@ public class CodeSystemController {
 			showFutureVersions = showFutureVersionsDefault;
 		}
 		if (showInternalReleases == null) {
-			showInternalReleases = showInteralReleasesByDefault;
+			showInternalReleases = showInternalReleasesByDefault;
 		}
 
 		List<CodeSystemVersion> codeSystemVersions = codeSystemService.findAllVersions(shortName, showFutureVersions, showInternalReleases);
@@ -178,9 +183,17 @@ public class CodeSystemController {
 					"to support creating a new version of the extension. \n\n" +
 					"If you are the extension maintainer an integrity check should be run after this operation to find content that needs fixing. ")
 	@PostMapping(value = "/{shortName}/upgrade")
-	public void upgradeCodeSystem(@PathVariable String shortName, @RequestBody CodeSystemUpgradeRequest request) throws ServiceException {
+	public ResponseEntity<Void> upgradeCodeSystem(@PathVariable String shortName, @RequestBody CodeSystemUpgradeRequest request) throws ServiceException {
 		CodeSystem codeSystem = codeSystemService.findOrThrow(shortName);
-		codeSystemUpgradeService.upgrade(codeSystem, request.getNewDependantVersion(), TRUE.equals(request.getContentAutomations()));
+		String jobId = codeSystemUpgradeService.upgradeAsync(codeSystem, request.getNewDependantVersion(), TRUE.equals(request.getContentAutomations()));
+		return ControllerHelper.getCreatedResponse(jobId, "/" + shortName);
+	}
+
+	@Operation(summary = "Retrieve an upgrade job.",
+			description = "Retrieves the state of an upgrade job. Used to view the upgrade configuration and check its status.")
+	@GetMapping(value = "/upgrade/{jobId}")
+	public CodeSystemUpgradeJob getUpgradeJob(@PathVariable String jobId) {
+		return codeSystemUpgradeService.getUpgradeJobOrThrow(jobId);
 	}
 
 	@Operation(summary = "Check if daily build import matches today's date.")
@@ -208,18 +221,19 @@ public class CodeSystemController {
 	}
 
 
-	@Operation(summary = "Generate additional english language refset",
-			description = "Before running this extensions must be upgraded already. " +
-					"You must specify the branch path(e.g MAIN/SNOMEDCT-NZ/{project}/{task}) of the task for the delta to be added. " +
-					"When completeCopy flag is set to true, all active en-gb language refset components will be copied into the extension module. " +
-					"When completeCopy flag is set to false, only the changes from the latest international release will be copied/updated in the extension module. " +
-					"Currently you only need to run this when upgrading SNOMEDCT-IE and SNOMEDCT-NZ")
+	@Operation(summary = "Generate additional english language refset for certain extensions (IE or NZ) by copying international en-gb language refsets into extension module",
+			description = "Before running this the extension must be upgraded already. " +
+					"You must specify a task branch path (e.g MAIN/SNOMEDCT-NZ/{project}/{task}) for the delta to be created in. " +
+					"Set completeCopy flag to true when creating extension for the first time. It will copy all active en-gb language refset components into extension module. " +
+					"Set completeCopy flag to false for subsequent upgrades. Recent changes only from international release will be copied/updated in extension module. " +
+					"It works for both incremental monthly upgrade and roll-up upgrade (e.g every 6 months). " +
+					"Currently you should only run this api when upgrading SNOMEDCT-IE and SNOMEDCT-NZ")
 	@PostMapping(value = "/{shortName}/additional-en-language-refset-delta")
 	public void generateAdditionalLanguageRefsetDelta(@PathVariable String shortName,
 													  @RequestParam String branchPath,
 													  @Parameter(description = "The language refset to copy from e.g 900000000000508004 | Great Britain English language reference set (foundation metadata concept) ")
 													  @RequestParam (defaultValue = "900000000000508004") String languageRefsetToCopyFrom,
-													  @Parameter(description = "Set completeCopy to true to copy all active components and false to copy only changes from the latest release.")
+													  @Parameter(description = "Set completeCopy to true to copy all active components and false to copy changes only from recent international release.")
 													  @RequestParam (defaultValue = "false") Boolean completeCopy) {
 
 		ControllerHelper.requiredParam(shortName, "shortName");
@@ -241,7 +255,8 @@ public class CodeSystemController {
 		codeSystemVersionService.clearCache();
 	}
 
-	@Operation(summary = "Update details from config. For each existing Code System the name, country code and owner are set using the values in configuration.")
+	@Operation(summary = "Update details from application configuration. " +
+			"For each existing Code System the name, country code and owner are set using the values in the application configuration.")
 	@PostMapping(value = "/update-details-from-config")
 	@PreAuthorize("hasPermission('ADMIN', 'global')")
 	public void updateDetailsFromConfig() {

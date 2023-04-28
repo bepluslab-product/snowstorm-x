@@ -56,17 +56,16 @@ public class MRCMLoader implements CommitListener {
     /**
      * Retrieve the latest MRCM for the given branch.
      *
-     * @param branchPath     The branch to read MRCM data from.
      * @param branchCriteria The branch criteria to use for querying the target branch.
      * @return The MRCM for the given branch.
      * @throws ServiceException When there is an issue reading MRCM.
      */
     // TODO: Make this work for MRCM extensions. Ask Guillermo how he is extending the MRCM in Extensions TermMed are maintaining.
-    public MRCM loadActiveMRCM(String branchPath, BranchCriteria branchCriteria) throws ServiceException {
+    public MRCM loadActiveMRCM(BranchCriteria branchCriteria) throws ServiceException {
         final TimerUtil timer = new TimerUtil("MRCM");
-        final List<Domain> domains = getDomains(branchPath, branchCriteria, timer);
-        final List<AttributeDomain> attributeDomains = getAttributeDomains(branchPath, branchCriteria, timer);
-        final List<AttributeRange> attributeRanges = getAttributeRanges(branchPath, branchCriteria, timer);
+        final List<Domain> domains = getDomains(branchCriteria, timer);
+        final List<AttributeDomain> attributeDomains = getAttributeDomains(branchCriteria, timer);
+        final List<AttributeRange> attributeRanges = getAttributeRanges(branchCriteria, timer);
 
         return new MRCM(domains, attributeDomains, attributeRanges);
     }
@@ -88,22 +87,14 @@ public class MRCMLoader implements CommitListener {
             return cachedMRCM;
         }
         LOGGER.debug("MRCM not present in cache; loading MRCM.");
-
-        final BranchCriteria branchCriteria = versionControlHelper.getBranchCriteria(branchPath);
-        final TimerUtil timer = new TimerUtil("MRCM");
-        final List<Domain> domains = getDomains(branchPath, branchCriteria, timer);
-        final List<AttributeDomain> attributeDomains = getAttributeDomains(branchPath, branchCriteria, timer);
-        final List<AttributeRange> attributeRanges = getAttributeRanges(branchPath, branchCriteria, timer);
-        final MRCM mrcm = new MRCM(domains, attributeDomains, attributeRanges);
-
+        final MRCM mrcm = loadActiveMRCM(versionControlHelper.getBranchCriteria(branchPath));
         cache.putIfAbsent(branchPath, mrcm);
         return mrcm;
     }
 
-    private List<Domain> getDomains(final String branchPath,
-                                    final BranchCriteria branchCriteria,
+    private List<Domain> getDomains(final BranchCriteria branchCriteria,
                                     final TimerUtil timer) throws ServiceException {
-        List<ReferenceSetMember> domainMembers = memberService.findMembers(branchPath, branchCriteria,
+        List<ReferenceSetMember> domainMembers = memberService.findMembers(branchCriteria,
                 new MemberSearchRequest().referenceSet(Concepts.REFSET_MRCM_DOMAIN_INTERNATIONAL), LARGE_PAGE).getContent();
 
         List<Domain> domains = new ArrayList<>();
@@ -130,10 +121,9 @@ public class MRCMLoader implements CommitListener {
         return domains;
     }
 
-    private List<AttributeDomain> getAttributeDomains(final String branchPath,
-                                                      final BranchCriteria branchCriteria,
+    private List<AttributeDomain> getAttributeDomains(final BranchCriteria branchCriteria,
                                                       final TimerUtil timer) throws ServiceException {
-        List<ReferenceSetMember> attributeDomainMembers = memberService.findMembers(branchPath, branchCriteria,
+        List<ReferenceSetMember> attributeDomainMembers = memberService.findMembers(branchCriteria,
                 new MemberSearchRequest().referenceSet(Concepts.REFSET_MRCM_ATTRIBUTE_DOMAIN_INTERNATIONAL), LARGE_PAGE).getContent();
 
         List<AttributeDomain> attributeDomains = new ArrayList<>();
@@ -160,10 +150,9 @@ public class MRCMLoader implements CommitListener {
         return attributeDomains;
     }
 
-    private List<AttributeRange> getAttributeRanges(final String branchPath,
-                                                    final BranchCriteria branchCriteria,
+    private List<AttributeRange> getAttributeRanges(final BranchCriteria branchCriteria,
                                                     final TimerUtil timer) {
-        List<ReferenceSetMember> attributeRangeMembers = memberService.findMembers(branchPath, branchCriteria,
+        List<ReferenceSetMember> attributeRangeMembers = memberService.findMembers(branchCriteria,
                 new MemberSearchRequest().referenceSet(Concepts.REFSET_MRCM_ATTRIBUTE_RANGE_INTERNATIONAL), LARGE_PAGE).getContent();
 
         List<AttributeRange> attributeRanges = new ArrayList<>();

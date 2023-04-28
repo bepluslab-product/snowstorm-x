@@ -12,12 +12,14 @@ import org.hl7.fhir.r4.model.OperationOutcome;
 import org.hl7.fhir.r4.model.ValueSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.snomed.snowstorm.core.data.services.ServiceException;
 import org.snomed.snowstorm.fhir.domain.FHIRCodeSystemVersion;
 import org.snomed.snowstorm.fhir.domain.FHIRPackageIndex;
 import org.snomed.snowstorm.fhir.domain.FHIRPackageIndexFile;
 import org.snomed.snowstorm.fhir.pojo.FHIRCodeSystemVersionParams;
 import org.snomed.snowstorm.fhir.pojo.ValueSetExpansionParameters;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -32,6 +34,9 @@ import static java.lang.String.format;
 
 @Service
 public class FHIRLoadPackageService {
+
+	@Value("${snowstorm.rest-api.readonly}")
+	private boolean readOnlyMode;
 
 	@Autowired
 	private ObjectMapper mapper;
@@ -51,6 +56,8 @@ public class FHIRLoadPackageService {
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 
 	public void uploadPackageResources(File packageFile, Set<String> resourceUrlsToImport, String submittedFileName, boolean testValueSets) throws IOException {
+		FHIRHelper.readOnlyCheck(readOnlyMode);
+
 		JsonParser jsonParser = (JsonParser) fhirContext.newJsonParser();
 		FHIRPackageIndex index = extractObject(packageFile, ".index.json", FHIRPackageIndex.class, jsonParser);
 		Set<String> supportedResourceTypes = Set.of("CodeSystem", "ValueSet");
@@ -83,12 +90,17 @@ public class FHIRLoadPackageService {
 						logger.info("Skipping import of CodeSystem %s with 'content:not-present' because a CodeSystem with the same url and version already exists.");
 					} else {
 						logger.info("Deleting existing CodeSystem and concepts for url:{}, version:{}", existingCodeSystemVersion.getUrl(), existingCodeSystemVersion.getVersion());
-						codeSystemService.deleteCodeSystemVersion(existingCodeSystemVersion.getId());
+						codeSystemService.deleteCodeSystemVersion(existingCodeSystemVersion);
 					}
 				}
 				List<CodeSystem.ConceptDefinitionComponent> concepts = codeSystem.getConcept();
 				logger.info("Importing CodeSystem {} with {} concepts from package", codeSystem.getUrl(), concepts != null ? concepts.size() : 0);
-				FHIRCodeSystemVersion codeSystemVersion = codeSystemService.save(codeSystem);
+				FHIRCodeSystemVersion codeSystemVersion;
+				try {
+					codeSystemVersion = codeSystemService.createUpdate(codeSystem);
+				} catch (ServiceException e) {
+					throw new IOException("Failed to create FHIR CodeSystem.", e);
+				}
 				if (concepts != null) {
 					fhirConceptService.saveAllConceptsOfCodeSystemVersion(concepts, codeSystemVersion);
 				}

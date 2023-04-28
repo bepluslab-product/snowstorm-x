@@ -1,6 +1,5 @@
 package org.snomed.snowstorm.fhir.services;
 
-import ca.uhn.fhir.jpa.entity.TermCodeSystem;
 import ca.uhn.fhir.jpa.entity.TermCodeSystemVersion;
 import ca.uhn.fhir.jpa.entity.TermConcept;
 import ca.uhn.fhir.jpa.model.entity.ResourceTable;
@@ -8,7 +7,7 @@ import ca.uhn.fhir.jpa.term.UploadStatistics;
 import ca.uhn.fhir.jpa.term.api.ITermCodeSystemStorageSvc;
 import ca.uhn.fhir.jpa.term.custom.CustomTerminologySet;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
-import ca.uhn.fhir.rest.api.server.storage.ResourcePersistentId;
+import ca.uhn.fhir.rest.api.server.storage.IResourcePersistentId;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.ConceptMap;
@@ -16,10 +15,13 @@ import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.ValueSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.snomed.snowstorm.core.data.services.RuntimeServiceException;
+import org.snomed.snowstorm.core.data.services.ServiceException;
 import org.snomed.snowstorm.fhir.config.FHIRConstants;
 import org.snomed.snowstorm.fhir.domain.FHIRCodeSystemVersion;
 import org.snomed.snowstorm.fhir.domain.FHIRConceptMap;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -28,6 +30,9 @@ import static org.snomed.snowstorm.core.util.CollectionUtils.orEmpty;
 
 @Service
 public class FHIRTermCodeSystemStorage implements ITermCodeSystemStorageSvc {
+
+	@Value("${snowstorm.rest-api.readonly}")
+	private boolean readOnlyMode;
 
 	@Autowired
 	private FHIRCodeSystemService fhirCodeSystemService;
@@ -39,33 +44,37 @@ public class FHIRTermCodeSystemStorage implements ITermCodeSystemStorageSvc {
 	private FHIRValueSetService fhirValueSetService;
 
 	@Autowired
-	private FHIRConceptMapProvider fhirConceptMapProvider;
+	private FHIRConceptMapService fhirConceptMapService;
 
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 
 	@Override
-	public void deleteCodeSystem(TermCodeSystem termCodeSystem) {
-	}
-
-	@Override
-	public void deleteCodeSystemVersion(TermCodeSystemVersion termCodeSystemVersion) {
+	public void storeNewCodeSystemVersion(IResourcePersistentId theCodeSystemResourcePid, String theSystemUri, String theSystemName,
+			String theSystemVersionId, TermCodeSystemVersion theCodeSystemVersion, ResourceTable theCodeSystemResourceTable,
+			RequestDetails theRequestDetails) {
 
 	}
 
 	@Override
-	public void storeNewCodeSystemVersion(ResourcePersistentId resourcePersistentId, String s, String s1, String s2, TermCodeSystemVersion termCodeSystemVersion, ResourceTable resourceTable, RequestDetails requestDetails) {
+	public void storeNewCodeSystemVersion(IResourcePersistentId theCodeSystemResourcePid, String theSystemUri, String theSystemName, String theSystemVersionId, TermCodeSystemVersion theCodeSystemVersion, ResourceTable theCodeSystemResourceTable) {
+		ITermCodeSystemStorageSvc.super.storeNewCodeSystemVersion(theCodeSystemResourcePid, theSystemUri, theSystemName, theSystemVersionId, theCodeSystemVersion, theCodeSystemResourceTable);
 	}
 
 	@Override
 	public IIdType storeNewCodeSystemVersion(CodeSystem codeSystem, TermCodeSystemVersion termCodeSystemVersion, RequestDetails requestDetails,
 			List<ValueSet> valueSets, List<ConceptMap> conceptMaps) {
 
+		FHIRHelper.readOnlyCheck(readOnlyMode);
 		FHIRCodeSystemVersion codeSystemVersion;
 		codeSystem.setContent(CodeSystem.CodeSystemContentMode.COMPLETE);
 		if (codeSystem.getUrl().startsWith(FHIRConstants.ICD10_URI)) {
 			codeSystem.setHierarchyMeaning(CodeSystem.CodeSystemHierarchyMeaning.ISA);
 		}
-		codeSystemVersion = fhirCodeSystemService.save(codeSystem);
+		try {
+			codeSystemVersion = fhirCodeSystemService.createUpdate(codeSystem);
+		} catch (ServiceException e) {
+			throw new RuntimeServiceException("Failed to create FHIR CodeSystem.", e);
+		}
 		fhirConceptService.saveAllConceptsOfCodeSystemVersion(termCodeSystemVersion, codeSystemVersion);
 
 		valueSets = orEmpty(valueSets);
@@ -77,7 +86,7 @@ public class FHIRTermCodeSystemStorage implements ITermCodeSystemStorageSvc {
 		for (ConceptMap conceptMap : conceptMaps) {
 			try {
 				FHIRConceptMap map = new FHIRConceptMap(conceptMap);
-				fhirConceptMapProvider.createMap(map);
+				fhirConceptMapService.createOrUpdate(map);
 			} catch (SnowstormFHIRServerResponseException e) {
 				logger.error("Failed to store ConceptMap {}", conceptMap.getIdElement(), e);
 			}
@@ -105,8 +114,4 @@ public class FHIRTermCodeSystemStorage implements ITermCodeSystemStorageSvc {
 		return 0;
 	}
 
-	@Override
-	public ResourcePersistentId getValueSetResourcePid(IIdType iIdType) {
-		return null;
-	}
 }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectReader;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import io.kaicode.elasticvc.api.BranchService;
+import io.kaicode.elasticvc.api.PathUtil;
 import io.kaicode.elasticvc.api.VersionControlHelper;
 import io.kaicode.elasticvc.domain.Branch;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -52,6 +53,9 @@ public class BranchReviewService {
 	private BranchService branchService;
 
 	@Autowired
+	private SBranchService sBranchService;
+
+	@Autowired
 	private VersionControlHelper versionControlHelper;
 
 	@Autowired
@@ -77,6 +81,12 @@ public class BranchReviewService {
 
 	@Autowired
 	private ExecutorService executorService;
+
+	@Autowired
+	private AutoMerger autoMerger;
+
+	@Autowired
+	private CodeSystemService codeSystemService;
 
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 
@@ -144,7 +154,7 @@ public class BranchReviewService {
 		assertMergeReviewCurrent(mergeReview);
 
 		final Set<Long> conceptsChangedInBoth = getConflictingConceptIds(mergeReview);
-
+		boolean targetBranchVersionBehind = isTargetBranchVersionBehind(mergeReview);
 		final Map<Long, MergeReviewConceptVersions> conflicts = new HashMap<>();
 		if (!conceptsChangedInBoth.isEmpty()) {
 
@@ -169,16 +179,76 @@ public class BranchReviewService {
 				} else {
 					if (sourceVersion != null && targetVersion != null) {
 						// Neither deleted, auto-merge.
-						mergeVersion.setAutoMergedConcept(autoMergeConcept(sourceVersion, targetVersion));
-
-						// Upgrade components if behind a release/version
-						mergeVersion.setTargetConcept(upgradeComponents(sourceVersion, targetVersion));
+						mergeVersion.setAutoMergedConcept(autoMerger.autoMerge(sourceVersion, targetVersion, mergeReview.getTargetPath()));
+						if (sourceVersion.isReleased()) {
+							mergeVersion.setTargetConceptVersionBehind(targetBranchVersionBehind);
+						}
 					}
 					conflicts.put(conceptId, mergeVersion);
 				}
 			});
 		}
 		return conflicts.values();
+	}
+
+	private boolean isTargetBranchVersionBehind(MergeReview mergeReview) {
+		String sourcePath = mergeReview.getSourcePath();
+		String targetPath = mergeReview.getTargetPath();
+		Branch originalSourceBranch = getOriginatingTopLevelBranch(sourcePath);
+		Branch originalTargetBranch = getOriginatingTopLevelBranch(targetPath);
+
+		long leftTopLevelBaseTimestamp = originalSourceBranch.getBaseTimestamp();
+		long rightTopLevelBaseTimestamp = originalTargetBranch.getBaseTimestamp();
+		if (rightTopLevelBaseTimestamp < leftTopLevelBaseTimestamp) {
+			return true;
+		}
+
+		long leftTopLevelHeadTimestamp = originalSourceBranch.getHeadTimestamp();
+		long rightTopLevelHeadTimestamp = originalTargetBranch.getHeadTimestamp();
+		if (leftTopLevelHeadTimestamp == rightTopLevelHeadTimestamp) {
+			return false;
+		}
+
+		CodeSystem codeSystem = codeSystemService.findClosestCodeSystemUsingAnyBranch(sourcePath, false);
+		if (codeSystem == null) {
+			return false;
+		}
+
+		Branch lhsReleaseBranch = codeSystemService.findVersionBranchByCodeSystemAndBaseTimestamp(codeSystem, leftTopLevelHeadTimestamp);
+		if (lhsReleaseBranch == null) {
+			return false;
+		}
+
+		return lhsReleaseBranch.getHeadTimestamp() > rightTopLevelHeadTimestamp;
+	}
+
+	private Branch getOriginatingTopLevelBranch(String path) {
+		if (isCodeSystemBranch(path)) {
+			return branchService.findBranchOrThrow(path);
+		}
+
+		Branch originatingParentBranch = null;
+		String tmpPath = path;
+		Branch tmpBranch = branchService.findLatest(tmpPath);
+		boolean findingTopLevelBaseTimestamp = true;
+		while (findingTopLevelBaseTimestamp) {
+			String parentPath = PathUtil.getParentPath(tmpPath);
+			Branch parentBranch = sBranchService.findByPathAndHeadTimepoint(parentPath, tmpBranch.getBase().getTime());
+
+			if (isCodeSystemBranch(parentPath)) {
+				findingTopLevelBaseTimestamp = false;
+				originatingParentBranch = parentBranch;
+			}
+
+			tmpPath = parentPath;
+			tmpBranch = parentBranch;
+		}
+
+		return originatingParentBranch;
+	}
+
+	private boolean isCodeSystemBranch(String path) {
+		return path.equals("MAIN") || path.startsWith("SNOMEDCT-", path.lastIndexOf("/") + 1);
 	}
 
 	public void applyMergeReview(MergeReview mergeReview) throws ServiceException {
@@ -217,7 +287,7 @@ public class BranchReviewService {
 				if (sourceConceptVersioned && concept == null) {
 					concept = sourceConcept;
 				} else if (sourceConceptVersioned && !concept.isReleased() && concept.getReleasedEffectiveTime() == null) {
-					concept = autoMergeConcept(sourceConcept, concept);
+					concept = autoMerger.autoMerge(sourceConcept, concept, mergeReview.getTargetPath());
 				} else if (manuallyMergedConcept.isDeleted()) {
 					concept = new Concept(manuallyMergedConcept.getConceptId().toString());
 					concept.markDeleted();
@@ -229,85 +299,6 @@ public class BranchReviewService {
 			throw new ServiceException("Failed to deserialise manually merged concept from temp store. mergeReview:" + mergeReview.getId() + ", conceptId:" + manuallyMergedConcept.getConceptId(), e);
 		}
 		branchMergeService.mergeBranchSync(mergeReview.getSourcePath(), mergeReview.getTargetPath(), concepts);
-	}
-
-	private Concept upgradeComponents(Concept sourceVersion, Concept targetVersion) {
-		// Copy from latest component
-		Concept winningConcept = sourceVersion.isReleasedMoreRecentlyThan(targetVersion) ? sourceVersion : targetVersion;
-
-		Concept upgradedConcept = new Concept();
-		upgradedConcept.setConceptId(winningConcept.getConceptId());
-		upgradedConcept.setEffectiveTimeI(winningConcept.getEffectiveTimeI());
-		upgradedConcept.setActive(winningConcept.isActive());
-		upgradedConcept.setReleased(winningConcept.isReleased());
-		upgradedConcept.setReleaseHash(winningConcept.getReleaseHash());
-		upgradedConcept.setReleasedEffectiveTime(winningConcept.getReleasedEffectiveTime());
-		upgradedConcept.setModuleId(winningConcept.getModuleId());
-		upgradedConcept.setDefinitionStatusId(winningConcept.getDefinitionStatusId());
-		upgradedConcept.setInactivationIndicator(winningConcept.getInactivationIndicator());
-		upgradedConcept.setAssociationTargets(winningConcept.getAssociationTargets());
-		upgradedConcept.setDescriptions(mergePublished(sourceVersion.getDescriptions(), targetVersion.getDescriptions()));
-		upgradedConcept.setRelationships(mergePublished(sourceVersion.getRelationships(), targetVersion.getRelationships()));
-		upgradedConcept.setClassAxioms(mergePublishedAxioms(sourceVersion.getClassAxioms(), targetVersion.getClassAxioms()));
-		upgradedConcept.setGciAxioms(mergePublishedAxioms(sourceVersion.getGciAxioms(), sourceVersion.getGciAxioms()));
-
-		return upgradedConcept;
-	}
-
-	private <T extends SnomedComponent> Set<T> mergePublished(Set<T> sourceComponents, Set<T> targetComponents) {
-		Map<String, T> mergedComponents = new HashMap<>();
-		for (T sourceComponent : sourceComponents) {
-			// published and no further changes
-			if (sourceComponent.getEffectiveTimeI() != null) {
-				mergedComponents.put(sourceComponent.getId(), sourceComponent);
-			}
-		}
-
-		for (T targetComponent : targetComponents) {
-			String targetComponentId = targetComponent.getId();
-			if (mergedComponents.containsKey(targetComponentId)) {
-				T sourceComponent = mergedComponents.get(targetComponentId);
-				if (targetComponent.getEffectiveTimeI() == null) {
-					// target version with change but need to update old release details
-					targetComponent.setReleasedEffectiveTime(sourceComponent.getReleasedEffectiveTime());
-					targetComponent.setReleaseHash(sourceComponent.getReleaseHash());
-					mergedComponents.put(targetComponentId, targetComponent);
-				}
-			} else {
-				// component only exists in target
-				mergedComponents.put(targetComponentId, targetComponent);
-			}
-		}
-
-		return new HashSet<>(mergedComponents.values());
-	}
-
-	private Set<Axiom> mergePublishedAxioms(Set<Axiom> sourceAxioms, Set<Axiom> targetAxioms) {
-		Map<String, Axiom> mergedAxioms = new HashMap<>();
-
-		for (Axiom sourceAxiom : sourceAxioms) {
-			if (sourceAxiom.isReleased()) {
-				mergedAxioms.put(sourceAxiom.getAxiomId(), sourceAxiom);
-			}
-		}
-
-		for (Axiom targetAxiom : targetAxioms) {
-			String targetAxiomId = targetAxiom.getAxiomId();
-			Axiom sourceAxiom = mergedAxioms.get(targetAxiomId);
-
-			if (sourceAxiom == null) {
-				mergedAxioms.put(targetAxiomId, targetAxiom);
-			} else {
-				ReferenceSetMember sourceMember = sourceAxiom.getReferenceSetMember();
-				ReferenceSetMember targetMember = targetAxiom.getReferenceSetMember();
-
-				if (!sourceMember.isReleasedMoreRecentlyThan(targetMember)) {
-					mergedAxioms.put(targetAxiomId, targetAxiom);
-				}
-			}
-		}
-
-		return new HashSet<>(mergedAxioms.values());
 	}
 
 	private void assertMergeReviewCurrent(MergeReview mergeReview) {
@@ -323,58 +314,6 @@ public class BranchReviewService {
 		Set<Long> sourceToTargetReviewChanges = sourceToTargetReview.getChangedConcepts();
 		Set<Long> targetToSourceReviewChanges = targetToSourceReview.getChangedConcepts();
 		return Sets.intersection(sourceToTargetReviewChanges, targetToSourceReviewChanges);
-	}
-
-	private Concept autoMergeConcept(Concept sourceConcept, Concept targetConcept) {
-		final Concept mergedConcept = new Concept();
-
-		// In each component favour the source version unless only the target is unpublished
-		Concept winningConcept = sourceConcept.getEffectiveTimeI() != null && targetConcept.getEffectiveTimeI() == null ? targetConcept : sourceConcept;
-
-		// Set directly owned values
-		mergedConcept.setConceptId(winningConcept.getConceptId());
-		mergedConcept.setActive(winningConcept.isActive());
-		mergedConcept.setDefinitionStatus(winningConcept.getDefinitionStatus());
-		mergedConcept.setEffectiveTimeI(winningConcept.getEffectiveTimeI());
-		mergedConcept.setModuleId(winningConcept.getModuleId());
-		mergedConcept.setReleased(winningConcept.isReleased());
-		mergedConcept.setReleaseHash(winningConcept.getReleaseHash());
-		mergedConcept.setReleasedEffectiveTime(winningConcept.getReleasedEffectiveTime());
-
-		mergedConcept.setInactivationIndicator(winningConcept.getInactivationIndicator());
-		mergedConcept.setAssociationTargets(winningConcept.getAssociationTargets());
-
-		// Merge Descriptions
-		mergedConcept.setDescriptions(mergeComponentSets(sourceConcept.getDescriptions(), targetConcept.getDescriptions()));
-
-		// Merge Relationships
-		mergedConcept.setRelationships(mergeComponentSets(sourceConcept.getRelationships(), targetConcept.getRelationships()));
-
-		// Merge Axioms
-		mergedConcept.setClassAxioms(mergeComponentSets(sourceConcept.getClassAxioms(), targetConcept.getClassAxioms()));
-		mergedConcept.setGciAxioms(mergeComponentSets(sourceConcept.getGciAxioms(), targetConcept.getGciAxioms()));
-
-		return mergedConcept;
-	}
-
-	private <T extends IdAndEffectiveTimeComponent> Set<T> mergeComponentSets(Set<T> sourceComponents, Set<T> targetComponents) {
-		final Set<T> mergedComponents = new HashSet<>(sourceComponents);
-		for (final T targetComponent : targetComponents) {
-			if (targetComponent.getEffectiveTimeI() == null) {
-				if (mergedComponents.contains(targetComponent)) {
-					Optional<T> sourceComponent = mergedComponents.stream()
-							.filter(otherComponent -> otherComponent.getId().equals(targetComponent.getId())).findFirst();
-					if (sourceComponent.isPresent() && sourceComponent.get().getEffectiveTimeI() != null) {
-						// Only target component is unpublished, replace.
-						mergedComponents.add(targetComponent);
-					}
-				} else {
-					// Target component is new and not yet promoted to source.
-					mergedComponents.add(targetComponent);
-				}
-			}
-		}
-		return mergedComponents;
 	}
 
 	public BranchReview getCreateReview(String source, String target) {

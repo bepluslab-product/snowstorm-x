@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.snomed.snowstorm.core.data.domain.CodeSystem;
 import org.snomed.snowstorm.core.data.domain.CodeSystemVersion;
 import org.snomed.snowstorm.core.data.services.classification.BranchClassificationStatusService;
+import org.snomed.snowstorm.core.data.services.postcoordination.ExpressionRepositoryService;
 import org.snomed.snowstorm.core.data.services.servicehook.CommitServiceHookClient;
 import org.snomed.snowstorm.rest.pojo.SetAuthorFlag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,7 @@ import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.query.NativeSearchQuery;
 import org.springframework.data.elasticsearch.core.query.NativeSearchQueryBuilder;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -66,6 +68,10 @@ public class SBranchService {
 	}
 
 	public Branch create(String branchPath, Map<String, Object> metadataMap) {
+		if (StringUtils.hasLength(branchPath)) {
+			branchPath = branchPath.toUpperCase();
+		}
+
 		// Copy classification state from parent branch
 		final String parentPath = PathUtil.getParentPath(branchPath);
 		final Metadata metadata = new Metadata(metadataMap);
@@ -112,6 +118,25 @@ public class SBranchService {
 				.withPageable(PageRequest.of(0, path.size(), sort));
 		return elasticsearchTemplate.search(queryBuilder.build(), Branch.class)
 				.stream().map(SearchHit::getContent).collect(Collectors.toList());
+	}
+
+	public Branch findByPathAndHeadTimepoint(String path, long head) {
+		SearchHits<Branch> query = elasticsearchTemplate.search(
+				new NativeSearchQueryBuilder()
+						.withQuery(
+								boolQuery()
+										.must(termQuery("path", path))
+										.must(termQuery("head", head))
+						)
+						.withPageable(PageRequest.of(0, 1))
+						.build(), Branch.class
+		);
+
+		if (query.isEmpty()) {
+			return null;
+		}
+
+		return query.getSearchHit(0).getContent();
 	}
 
 	public void rollbackCommit(String branchPath, long timepoint) {
@@ -208,5 +233,11 @@ public class SBranchService {
 		metadata.putMap(AUTHOR_FLAGS_METADATA_KEY, authFlagMap);
 
 		return branchService.updateMetadata(branchPath, metadata);
+	}
+
+	public void setMetadataItem(String branchPath, String key, String value) {
+		Metadata metadata = branchService.findBranchOrThrow(branchPath).getMetadata();
+		metadata.putString(key, value);
+		branchService.updateMetadata(branchPath, metadata);
 	}
 }

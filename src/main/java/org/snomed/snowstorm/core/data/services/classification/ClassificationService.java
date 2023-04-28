@@ -30,7 +30,6 @@ import org.snomed.snowstorm.core.data.repositories.classification.RelationshipCh
 import org.snomed.snowstorm.core.data.services.*;
 import org.snomed.snowstorm.core.data.services.classification.pojo.ClassificationStatusResponse;
 import org.snomed.snowstorm.core.data.services.classification.pojo.EquivalentConceptsResponse;
-import org.snomed.snowstorm.core.data.services.servicehook.CommitServiceHookClient;
 import org.snomed.snowstorm.core.pojo.LanguageDialect;
 import org.snomed.snowstorm.core.rf2.RF2Type;
 import org.snomed.snowstorm.core.rf2.export.ExportException;
@@ -108,10 +107,6 @@ public class ClassificationService {
 
 	@Autowired
 	private VersionControlHelper versionControlHelper;
-
-	@Autowired
-	private CommitServiceHookClient commitServiceHookClient;
-
 	@Autowired
 	private ConceptAttributeSortHelper conceptAttributeSortHelper;
 
@@ -216,9 +211,7 @@ public class ClassificationService {
 								}
 
 								final ClassificationStatus newStatusFinal = newStatus;
-								final SecurityContext context = SecurityContextHolder.getContext();
 								classificationProcessingExecutor.submit(() -> {
-									SecurityContextHolder.setContext(context); // Security context brought across into new thread
 									classification.setStatus(newStatusFinal);
 
 									if (newStatusFinal == COMPLETED) {
@@ -244,7 +237,6 @@ public class ClassificationService {
 												final boolean classified = !inferredRelationshipChangesFound && !equivalentConceptsFound;
 												BranchClassificationStatusService.setClassificationStatus(latestBranchCommit, classified);
 												branchService.updateMetadata(latestBranchCommit.getPath(), latestBranchCommit.getMetadata());
-												mockCommitCompletion(latestBranchCommit);
 											}
 
 										} catch (IOException | ElasticsearchException e) {
@@ -758,12 +750,6 @@ public class ClassificationService {
 				equivalentConceptsRepository.saveAll(equivalentConcepts);
 			}
 		}
-	}
-
-	private void mockCommitCompletion(Branch latestBranchCommit) {
-		// AAG will act accordingly by updating criteria.
-		logger.info("Letting external system know of classification results.");
-		commitServiceHookClient.preCommitCompletion(new Commit(latestBranchCommit, Commit.CommitType.CONTENT, null, null));
 	}
 
 	public void deleteAll() {

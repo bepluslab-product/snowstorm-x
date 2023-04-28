@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchDataAutoConfiguration;
 import org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.cloud.aws.autoconfigure.context.*;
 import org.springframework.context.annotation.PropertySource;
@@ -19,6 +20,10 @@ import org.testcontainers.elasticsearch.ElasticsearchContainer;
 import org.testcontainers.junit.jupiter.Container;
 
 import javax.annotation.PostConstruct;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.Properties;
 
 @PropertySource("application.properties")
 @PropertySource("application-test.properties")
@@ -30,13 +35,28 @@ import javax.annotation.PostConstruct;
 				ContextResourceLoaderAutoConfiguration.class,
 				ContextStackAutoConfiguration.class,
 				ElasticsearchRestClientAutoConfiguration.class,
-				ElasticsearchDataAutoConfiguration.class})
+				ElasticsearchDataAutoConfiguration.class,
+				DataSourceAutoConfiguration.class})
 public class TestConfig extends Config {
 
 	private static final String ELASTIC_SEARCH_SERVER_VERSION = "7.10.0";
 
-	// set it to true to use local instance instead of test container
-	static final boolean useLocalElasticsearch = false;
+	// If running unit tests regularly using an already running local Elasticsearch container can speed up testing
+	// To use this option create a test.properties file in the root of the project containing the value test.elasticsearch.local=true
+	static final boolean useLocalElasticsearch = "true".equalsIgnoreCase(loadTestProperties().getProperty("test.elasticsearch.local"));
+
+	private static Properties loadTestProperties() {
+		Properties properties = new Properties();
+		File file = new File("test.properties");
+		if (file.isFile()) {
+			try {
+				properties.load(new FileReader(file));
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+		return properties;
+	}
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(TestConfig.class);
 

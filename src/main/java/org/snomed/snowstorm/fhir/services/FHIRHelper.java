@@ -7,6 +7,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.*;
 import org.hl7.fhir.r4.model.OperationOutcome.IssueType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.snomed.snowstorm.core.data.domain.*;
 import org.snomed.snowstorm.core.data.services.DialectConfigurationService;
 import org.snomed.snowstorm.core.pojo.LanguageDialect;
@@ -37,15 +39,14 @@ public class FHIRHelper implements FHIRConstants {
 	private static final Pattern SNOMED_URI_MODULE_AND_VERSION_PATTERN = Pattern.compile("http://snomed.info/x?sct/(\\d+)/version/([\\d]{8})");
 	private static final Pattern SCT_ID_PATTERN = Pattern.compile("sct_(\\d)+_(\\d){8}");
 
-	private static final SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd"); // TODO: This is not thread safe!
-
 	@Autowired
 	private DialectConfigurationService dialectService;
 
 	private FhirContext fhirContext;
 
-	public static final Sort DEFAULT_SORT = Sort.sort(QueryConcept.class).by(QueryConcept::getConceptIdL).descending();
 	public static final Sort MEMBER_SORT = Sort.sort(ReferenceSetMember.class).by(ReferenceSetMember::getMemberId).descending();
+
+	private static final Logger logger = LoggerFactory.getLogger(FHIRHelper.class);
 	
 	public static boolean isSnomedUri(String uri) {
 		return uri != null && (uri.startsWith(SNOMED_URI) || uri.startsWith(SNOMED_URI_UNVERSIONED));
@@ -123,6 +124,20 @@ public class FHIRHelper implements FHIRConstants {
 		return url != null ? url.getValueAsString() : null;
 	}
 
+	public static void readOnlyCheck(boolean readOnlyMode) {
+		if (readOnlyMode) {
+			logger.info("Write operation not permitted, the server is in read-only mode.");
+			throw exception("Write operation not permitted.", IssueType.FORBIDDEN, 401);
+		}
+	}
+
+	public static boolean isPostcoordinatedSnomed(String code, FHIRCodeSystemVersionParams codeSystemParams) {
+		if (codeSystemParams.isSnomed() && code != null) {
+			return code.startsWith("===") || code.startsWith("<<<") || code.contains("+") || code.contains(":");
+		}
+		return false;
+	}
+
 	public List<LanguageDialect> getLanguageDialects(List<String> designations, String acceptLanguageHeader) {
 		// Use designations preferably, or fall back to language headers
 		final List<LanguageDialect> languageDialects = new ArrayList<>();
@@ -167,11 +182,13 @@ public class FHIRHelper implements FHIRConstants {
 		if (designations == null || designations.isEmpty()) {
 			return concept.getPt().getTerm();
 		}
-		
-		for (Description d : concept.getDescriptions()) {
-			if (d.hasAcceptability(Concepts.PREFERRED, designations.get(0)) &&
-					d.getTypeId().equals(Concepts.SYNONYM)) {
-				return d.getTerm();
+
+		for (LanguageDialect dialect : designations) {
+			for (Description d : concept.getDescriptions()) {
+				if (d.hasAcceptability(Concepts.PREFERRED, dialect) &&
+						d.getTypeId().equals(Concepts.SYNONYM)) {
+					return d.getTerm();
+				}
 			}
 		}
 		return null;
@@ -265,7 +282,9 @@ public class FHIRHelper implements FHIRConstants {
 		if (code == null && coding == null) {
 			throw exception("Use either 'code' or 'coding' parameters, not both.", IssueType.INVARIANT, 400);
 		} else if (code != null) {
-			if (code.getCode().contains("|")) {
+			if (code.getCode().contains("|") &&
+					// Only throw error if there is only one pipe in the code, otherwise this may be a postcoordinated expression with terms.
+					code.getCode().indexOf("|") == code.getCode().lastIndexOf("|")) {
 				throw exception("The 'code' parameter cannot supply a codeSystem. " +
 						"Use 'coding' or provide CodeSystem in 'system' parameter.", IssueType.NOTSUPPORTED, 400);
 			}
@@ -274,7 +293,15 @@ public class FHIRHelper implements FHIRConstants {
 		return coding.getCode();
 	}
 
-	public FHIRCodeSystemVersionParams getCodeSystemVersionParams(UriType codeSystemParam, StringType versionParam, Coding coding) {
+	public static FHIRCodeSystemVersionParams getCodeSystemVersionParams(String systemId, String version) {
+		return getCodeSystemVersionParams(null, systemId, version, null);
+	}
+
+	public static FHIRCodeSystemVersionParams getCodeSystemVersionParams(CanonicalUri systemCanonicalUri) {
+		return getCodeSystemVersionParams(null, systemCanonicalUri.getSystem(), systemCanonicalUri.getVersion(), null);
+	}
+
+	public static FHIRCodeSystemVersionParams getCodeSystemVersionParams(UriType codeSystemParam, StringType versionParam, Coding coding) {
 		return getCodeSystemVersionParams(null, codeSystemParam, versionParam, coding);
 	}
 
@@ -285,10 +312,10 @@ public class FHIRHelper implements FHIRConstants {
 
 	public static FHIRCodeSystemVersionParams getCodeSystemVersionParams(String systemId, String codeSystemParam, String versionParam, Coding coding) {
 		if (codeSystemParam != null && coding != null && coding.getSystem() != null && !codeSystemParam.equals(coding.getSystem())) {
-			throw exception("Code system defined in system and coding do not match.", IssueType.CONFLICT, 400);
+			throw exception("Code system defined in system and coding do not match.", IssueType.INVARIANT, 400);
 		}
 		if (versionParam != null && coding != null && coding.getVersion() != null && !versionParam.equals(coding.getVersion())) {
-			throw exception("Version defined in version and coding do not match.", IssueType.CONFLICT, 400);
+			throw exception("Version defined in version and coding do not match.", IssueType.INVARIANT, 400);
 		}
 
 		String codeSystemUrl = null;
@@ -298,7 +325,7 @@ public class FHIRHelper implements FHIRConstants {
 			codeSystemUrl = coding.getSystem();
 		}
 		if (codeSystemUrl == null && systemId == null) {
-			throw exception("Code system not defined in any parameter.", IssueType.CONFLICT, 400);
+			throw exception("Code system not defined in any parameter.", IssueType.INVARIANT, 400);
 		}
 
 		String version = null;
@@ -320,16 +347,20 @@ public class FHIRHelper implements FHIRConstants {
 				String versionWithoutParams = version.contains("?") ? version.substring(0, version.indexOf("?")) : version;
 				if ((matcher = SNOMED_URI_MODULE_PATTERN.matcher(versionWithoutParams)).matches()) {
 					codeSystemParams.setSnomedModule(matcher.group(1));
+					if (versionWithoutParams.startsWith(SNOMED_URI_UNVERSIONED)) {
+						codeSystemParams.setUnversionedExpressionRepository(true);
+					}
 				} else if ((matcher = SNOMED_URI_MODULE_AND_VERSION_PATTERN.matcher(versionWithoutParams)).matches()) {
 					if (codeSystemParams.isUnversionedSnomed()) {
 						throw exception("A specific version can not be requested when using " +
-								"the '" + SNOMED_URI_UNVERSIONED + "' code system.", IssueType.CONFLICT, 400);
+								"the '" + SNOMED_URI_UNVERSIONED + "' code system.", IssueType.INVARIANT, 400);
 					}
 					codeSystemParams.setSnomedModule(matcher.group(1));
 					codeSystemParams.setVersion(matcher.group(2));
 				} else {
 					throw exception(format("The version parameter for the '" + SNOMED_URI + "' system must use the format " +
-							"'http://snomed.info/sct/[sctid]' or http://snomed.info/sct/[sctid]/version/[YYYYMMDD]. Version provided does not match: '%s'.", versionWithoutParams), IssueType.CONFLICT, 400);
+							"'http://snomed.info/sct/[sctid]' or http://snomed.info/sct/[sctid]/version/[YYYYMMDD]. Version provided does not match: '%s'.", versionWithoutParams),
+							IssueType.INVARIANT, 400);
 				}
 			} else {
 				// Take version param literally
@@ -415,7 +446,7 @@ public class FHIRHelper implements FHIRConstants {
 		}
 		String value = obj.toString();
 		if (obj instanceof Date) {
-			value = sdf.format((Date)obj);
+			value = new SimpleDateFormat("yyyyMMdd").format((Date)obj);
 		}
 		return stringMatches(value, searchTerm);
 	}

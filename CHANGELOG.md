@@ -3,18 +3,35 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## SnowstormX 8.3.0 Beta Release (April 2023)
+This beta release introduces SNOMED CT postcoordination support in the FHIR API. 
 
-## Release 8.x - FHIR Multiple Code Systems
+This is the reference implementation to accompany the newly published [SNOMED CT Practical Guide to Postcoordination](http://snomed.org/postcoordination) from SNOMED International.
 
-This major release has an overhaul of the FHIR API :fire: and adds support for multiple code systems within the FHIR API!
+### Features
+- SNOMED CT postcoordination support
+  - Validate SNOMED CT postcoordinated expressions
+    - Check the syntax and [Machine Readable Concept Model](https://browser.ihtsdotools.org/mrcm) rules
+  - Transform common expressions to an MRCM compliant and classifiable form
+  - Test subsumption with postcoordinated expressions using incremental classification
+  - Build an expression repository using a FHIR code system supplement
+    - ECL support
+    - Expression repository uses expression refsets and other RF2 structures to support backup and restore
+ 
+_See new SnowstormX Postman collection that includes postcoordination examples:_ 
+
+[![Run in Postman](https://run.pstmn.io/button.svg)](https://god.gw.postman.com/run-collection/6085828-38d13887-bb38-4b49-a058-c623a0d260e7?action=collection%2Ffork&collection-url=entityId%3D6085828-38d13887-bb38-4b49-a058-c623a0d260e7%26entityType%3Dcollection%26workspaceId%3D283ac96f-72e6-436f-9f4b-c67af5d038a8)
+
+
+## 8.1.0 Release (March 2023)
+This release has an overhaul of the FHIR API :fire: and adds support for multiple code systems within the FHIR API!
 
 Previously Snowstorm only supported SNOMED CT but this release adds support for LOINC, ICD-10 (International), ICD-10-CM (US) and
 any other code system using a FHIR package or the Custom code system format.
 
 The custom code system format allows any local or national code system to be supported. These need to be transformed into the custom code system format before being loaded.
 
-**FIXME (update links for snowstorm 8.0.0 release)**
-See [Snowstorm FHIR Terminology Server documentation](https://github.com/IHTSDO/snowstorm-x/blob/snowstorm-x-8.1.0/docs/using-the-fhir-api.md) for details of how to 
+See [Snowstorm FHIR Terminology Server documentation](https://github.com/IHTSDO/snowstorm/blob/master/docs/using-the-fhir-api.md) for details of how to 
 load each package format and a link to the updated Postman collection for v8.
 
 ### Breaking
@@ -38,9 +55,48 @@ load each package format and a link to the updated Postman collection for v8.
 - Improve FHIR code system version resolution
 - Include resolved code system version in FHIR responses
 - Improved FHIR error catching and reporting
+- ISTO-41 Include optional non-SNOMED CT term in ReferenceSetMembers API response 
+- FRI-491 Improve `autoMergedConcept` in `MergeReviewConceptVersions` to be based on `sourceConcept` with changes from `targetConcept` re-applied 
+- FRI-600 Add property to `MergeReviewConceptVersions` to indicate whether `targetConcept` is based on an older version of the CodeSystem in relation to `sourceConcept`
 
 ### Fixes
 - Various fixes for FHIR specification conformance
+- MAINT-2072 Fix reversion of Historical Association ReferenceSetMembers
+- FRI-492 Stop setting `targetConcept` in `MergeReviewConceptVersions` to have the same state as the latest versioned content
+- ISTO-57 Fix pagination of CSV download
+- ISTO-67 Fix bug which prevented ECL statements being converted to JSON when containing `minus`
+
+## 8.0.0 Release (February 2023)
+Major release with Elasticsearch 7.10.0 upgrade.
+
+### Breaking
+- Elasticsearch from 7.10.0 to 7.17.9 must be used with this release.
+
+### Improvements
+- General
+  - MAINT-2018 Update Snowstorm to use Elasticsearch client 7.10.0.
+  - FRI-567 Add check to CodeSystem upgrade to prevent multiple sequential upgrades.
+  - ISTO-54 Add active flag to the Relationship target within the Concept JSON representation.
+  - FRI-398 Force branch paths to be in upper case.
+  - FRI-592 Update `generateAdditionalLanguageRefsetDelta` endpoint to work with both monthly and 6-monthly upgrades.
+- Authoring
+  - FRI-550 Add functionality to support CodeSystem upgrades via authoring platform UI.
+
+### Fixes
+- MAINT-2095 Fix browser performance search test case for ECL.
+- MAINT-2081 Prevent classification statuses from becoming stuck by listening to JMS Topic instead of Queue (requires Classification Service v7.0.0).
+
+
+## 7.12.0 Release (December 2022)
+Maintenance release with bug fixes and improvements.
+### Improvements
+- General
+  - MAINT-1974 Add optional configuration to allow new ReferenceSet types to be configured on branch other than MAIN.
+  
+### Fixes
+- MAINT-2071 Remove communication with Authoring Acceptance Gateway when completing classifications.
+- MAINT-1940 Stop inactive historical associations switching module when rebasing.
+- FRI-565 Correct Extension's traceability log when performing rebase after upgrading dependency.
 
 
 ## 7.11.0 Release (October 2022)

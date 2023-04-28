@@ -34,7 +34,7 @@ public class ReferenceSetMember extends SnomedComponent<ReferenceSetMember> impl
 			return ADDITIONAL_FIELDS_PREFIX + fieldname + ".keyword";
 		}
 	}
-	
+
 	public interface AttributeValueFields {
 		String VALUE_ID = "valueId";
 	}
@@ -58,6 +58,12 @@ public class ReferenceSetMember extends SnomedComponent<ReferenceSetMember> impl
 
 	public interface MRCMAttributeDomainFields {
 		String GROUPED = "grouped";
+	}
+
+	public interface PostcoordinatedExpressionFields {
+		String EXPRESSION = "expression";
+		String EXPRESSION_FIELD_PATH = Fields.ADDITIONAL_FIELDS_PREFIX + EXPRESSION;
+		String TRANSIENT_EXPRESSION_TERM = "transientExpressionTerm";
 	}
 
 	@JsonView(value = View.Component.class)
@@ -101,7 +107,7 @@ public class ReferenceSetMember extends SnomedComponent<ReferenceSetMember> impl
 	}
 
 	public ReferenceSetMember(String memberId, Integer effectiveTime, boolean active, String moduleId, String refsetId,
-			String referencedComponentId) {
+							  String referencedComponentId) {
 		this();
 		this.memberId = memberId;
 		setEffectiveTimeI(effectiveTime);
@@ -139,6 +145,26 @@ public class ReferenceSetMember extends SnomedComponent<ReferenceSetMember> impl
 			hashObjects[a++] = additionalFields.get(key);
 		}
 		return hashObjects;
+	}
+
+	public void revertToReleaseState() {
+		if (getReleaseHash() == null || getReleaseHash().isEmpty()) {
+			return;
+		}
+
+		String[] releaseHash = getReleaseHash().split("\\|");
+		boolean active = Boolean.parseBoolean(releaseHash[0]);
+		this.setActive(active);
+		this.setModuleId(releaseHash[1]);
+
+		for (int x = 2; x < releaseHash.length; x = x + 2) {
+			String key = releaseHash[x];
+			String value = releaseHash[x + 1];
+			setAdditionalField(key, value);
+			x = x + 1;
+		}
+
+		this.updateEffectiveTime();
 	}
 
 	public String getAdditionalField(String fieldName) {
@@ -189,16 +215,18 @@ public class ReferenceSetMember extends SnomedComponent<ReferenceSetMember> impl
 		return memberId;
 	}
 
-	public void setMemberId(String memberId) {
+	public ReferenceSetMember setMemberId(String memberId) {
 		this.memberId = memberId;
+		return this;
 	}
 
 	public String getRefsetId() {
 		return refsetId;
 	}
 
-	public void setRefsetId(String refsetId) {
+	public ReferenceSetMember setRefsetId(String refsetId) {
 		this.refsetId = refsetId;
+		return this;
 	}
 
 	public String getReferencedComponentId() {
@@ -229,6 +257,22 @@ public class ReferenceSetMember extends SnomedComponent<ReferenceSetMember> impl
 
 	public Coding getMapTargetCoding() {
 		return mapTargetCoding;
+	}
+
+	public void clone(ReferenceSetMember referenceSetMember) {
+		setMemberId(referenceSetMember.getMemberId());
+		setEffectiveTimeI(referenceSetMember.getEffectiveTimeI());
+		setReleasedEffectiveTime(referenceSetMember.getReleasedEffectiveTime());
+		setReleaseHash(referenceSetMember.getReleaseHash());
+		setReleased(referenceSetMember.isReleased());
+		setActive(referenceSetMember.isActive());
+		setModuleId(referenceSetMember.getModuleId());
+		setRefsetId(referenceSetMember.getRefsetId());
+		setReferencedComponentId(referenceSetMember.getReferencedComponentId());
+		setConceptId(referenceSetMember.getConceptId());
+		setAdditionalFields(new HashMap<>(referenceSetMember.getAdditionalFields()));
+
+		updateEffectiveTime();
 	}
 
 	@Override

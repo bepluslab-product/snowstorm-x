@@ -14,7 +14,7 @@ import org.snomed.snowstorm.rest.pojo.ItemsPage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.web.server.LocalServerPort;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = TestConfig.class)
 class CodeSystemControllerTest extends AbstractTest {
+
     @LocalServerPort
     private int port;
 
@@ -243,7 +244,7 @@ class CodeSystemControllerTest extends AbstractTest {
         givenCodeSystemUpgraded("SNOMEDCT-DM", 20210131); //Upgraded but not yet released.
     }
 
-    private void givenCodeSystemExists(String shortName, String branchPath) {
+    private void givenCodeSystemExists(String shortName, String branchPath) throws ServiceException {
         codeSystemService.createCodeSystem(new CodeSystem(shortName, branchPath));
     }
 
@@ -253,14 +254,14 @@ class CodeSystemControllerTest extends AbstractTest {
         codeSystemService.updateCodeSystemVersionPackage(codeSystemVersion, "SnomedCT_InternationalRF2_PRODUCTION_" + effectiveDate + "T120000Z.zip");
     }
 
-    private void givenCodeSystemExists(String shortName, String branchPath, Integer dependantVersion) {
+    private void givenCodeSystemExists(String shortName, String branchPath, Integer dependantVersion) throws ServiceException {
         CodeSystem newCodeSystem = new CodeSystem(shortName, branchPath);
         newCodeSystem.setDependantVersionEffectiveTime(dependantVersion);
         codeSystemService.createCodeSystem(newCodeSystem);
     }
 
     private void givenCodeSystemUpgraded(String shortName, int newDependentOnVersion) throws ServiceException {
-        codeSystemUpgradeService.upgrade(codeSystemService.find(shortName), newDependentOnVersion, false);
+        codeSystemUpgradeService.upgrade(null, codeSystemService.find(shortName), newDependentOnVersion, false);
     }
 
     private void givenCodeSystemVersionExists(String shortName, int effectiveDate, String description, int dependsOn) {
