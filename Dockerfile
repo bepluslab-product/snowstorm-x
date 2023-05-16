@@ -3,6 +3,9 @@ COPY . /usr/src/app
 WORKDIR /usr/src/app
 RUN mvn clean install -DskipTests=true -Ddependency-check.skip=true
 
+# get snomed-drools-rules
+RUN apt-get install git -y
+RUN git clone https://github.com/IHTSDO/snomed-drools-rules.git
 
 FROM adoptopenjdk/openjdk11:alpine
 LABEL maintainer="SNOMED International <tooling@snomed.org>"
@@ -14,7 +17,7 @@ VOLUME /tmp
 # Create necessary directories
 RUN mkdir /app
 WORKDIR /app
-RUN mkdir /snomed-drools-rules
+COPY --from=builder /usr/src/app/snomed-drools-rules snomed-drools-rules
 
 # Copy jar from builder image
 COPY --from=builder /usr/src/app/target/snowstorm-*.jar snowstorm.jar
