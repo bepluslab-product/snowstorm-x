@@ -84,7 +84,7 @@ public class FHIRConceptMap {
 
 	public FHIRConceptMap(ConceptMap hapiConceptMap) {
 		this();
-		id = hapiConceptMap.getId();
+		id = hapiConceptMap.getIdElement().getIdPart();
 		url = hapiConceptMap.getUrl();
 		Identifier hapiIdentifier = hapiConceptMap.getIdentifier();
 		if (hapiIdentifier != null) {
